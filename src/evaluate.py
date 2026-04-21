@@ -5,12 +5,17 @@ Evaluation metrics from the paper:
   3. Cosine similarity (real vs synthetic cross-comparison)
 """
 
+import argparse
+import json
+from pathlib import Path
+
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import f1_score
 from sklearn.manifold import TSNE
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 
@@ -18,15 +23,15 @@ def binary_classification(
     real: np.ndarray, synthetic: np.ndarray
 ) -> dict[str, float]:
     """
-    Train on synthetic, test on real (and vice versa).
-    Returns F1 scores for RF, SVM, MLP.
+    Stratified 70/30 split of (real=1, synthetic=0). F1 ≈ 0.5 means the
+    classifier can't distinguish real from synthetic (the paper's goal).
     """
     X = np.concatenate([real, synthetic])
     y = np.array([1] * len(real) + [0] * len(synthetic))
 
-    n_train = len(X) // 2
-    X_train, y_train = synthetic, np.zeros(len(synthetic))
-    X_test, y_test = real, np.ones(len(real))
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, stratify=y, random_state=42
+    )
 
     results = {}
     for name, clf in [
@@ -108,3 +113,33 @@ def evaluate_family(
         print(f"  t-SNE saved to {tsne_dir}/{family}_tsne.png")
 
     return {"binary_classification": clf_scores, "cosine_similarity": sim}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--family", required=True)
+    parser.add_argument("--checkpoints", type=Path, default=Path("checkpoints"))
+    parser.add_argument("--synthetic", type=Path, default=Path("synthetic"))
+    parser.add_argument("--out", type=Path, default=Path("eval_results"))
+    args = parser.parse_args()
+
+    real_path = args.checkpoints / f"{args.family}_embeddings.npy"
+    synth_path = args.synthetic / f"{args.family}_synthetic.npy"
+    if not real_path.exists():
+        raise FileNotFoundError(f"Missing real embeddings: {real_path}")
+    if not synth_path.exists():
+        raise FileNotFoundError(f"Missing synthetic embeddings: {synth_path}")
+
+    real = np.load(real_path)
+    synthetic = np.load(synth_path)
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    report = evaluate_family(args.family, real, synthetic, tsne_dir=str(args.out))
+
+    report_path = args.out / f"{args.family}_report.json"
+    report_path.write_text(json.dumps(report, indent=2))
+    print(f"\nReport saved to {report_path}")
+
+
+if __name__ == "__main__":
+    main()

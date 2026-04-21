@@ -1,3 +1,35 @@
+# Data (malware dataset — do not commit)
 malicia/
 docs/
-.venv312
+
+# Virtual environments
+.venv
+.venv312/
+venv/
+env/
+
+# Generated artifacts
+checkpoints/
+synthetic/
+eval_results/
+*.pt
+*.npy
+*.pkl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs / tmp
+*.log
+/tmp/
