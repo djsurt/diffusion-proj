@@ -89,7 +89,7 @@
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                    REVERSE DIFFUSION (generation)                   │   │
 │  │                                                                     │   │
-│  │  x_{T/2} ~ N(0, I)                                                  │   │
+│  │  x_{T/2} = forward_diffusion(real_sample, T/2)  // Algorithm 1      │   │
 │  │  for t = T/2, T/2-1, ..., 1:                                        │   │
 │  │      ε̂ = U-Net(x_t, t)                                              │   │
 │  │      x_{t-1} = (1/√α_t)(x_t - (1-α_t)/√(1-ᾱ_t) · ε̂) + σ_t · z   │   │

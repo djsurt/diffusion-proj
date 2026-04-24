@@ -33,3 +33,8 @@ __pycache__/
 # Logs / tmp
 *.log
 /tmp/
+
+# Claude Code
+.claude/
+memory/
+CLAUDE.md
