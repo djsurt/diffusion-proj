@@ -114,7 +114,7 @@ class AbsorbingD3PM(nn.Module):
         num_layers: int = 4,
         dim_ff: int = 512,
         dropout: float = 0.1,
-        lambda_ce: float = 0.01,
+        lambda_ce: float = 0.1,
     ) -> None:
         super().__init__()
         self.vocab_size = vocab_size

@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent))
 from data_loader import load_family_opcodes
-from d3pm_data import Vocabulary, OpcodeDataset
+from d3pm_data import Vocabulary, OpcodeDataset, OpcodeChunkedDataset
 from d3pm import AbsorbingD3PM
 
 
@@ -35,14 +35,24 @@ def train(
     epochs: int = 100,
     batch_size: int = 32,
     lr: float = 1e-3,
-    lambda_ce: float = 0.01,
+    lambda_ce: float = 0.1,
+    chunked: bool = True,
+    min_chunk: int = 32,
     device: torch.device,
 ) -> list[float]:
     # ── vocabulary ────────────────────────────────────────────────────────────
     vocab = Vocabulary.from_sequences(sequences)
     print(f"  Vocabulary size: {vocab.size}  (opcodes: {vocab.size - 2})")
 
-    dataset = OpcodeDataset(sequences, vocab, max_len=max_len)
+    if chunked:
+        dataset = OpcodeChunkedDataset(sequences, vocab, max_len=max_len, min_chunk=min_chunk)
+        avg_len = sum(len(s) for s in sequences) / max(len(sequences), 1)
+        print(f"  Chunked dataset: {len(dataset)} chunks of up to {max_len} tokens "
+              f"(avg file len: {avg_len:.0f})")
+    else:
+        dataset = OpcodeDataset(sequences, vocab, max_len=max_len)
+        print(f"  Truncated dataset: {len(dataset)} files (first {max_len} tokens each)")
+
     loader = DataLoader(dataset, batch_size=min(batch_size, len(dataset)),
                         shuffle=True, drop_last=False)
 
@@ -107,7 +117,11 @@ def main() -> None:
     parser.add_argument("--layers",   type=int, default=4)
     parser.add_argument("--dim-ff",   type=int, default=512)
     parser.add_argument("--lr",       type=float, default=1e-3)
-    parser.add_argument("--lambda-ce", type=float, default=0.01)
+    parser.add_argument("--lambda-ce", type=float, default=0.1)
+    parser.add_argument("--no-chunked", action="store_true",
+                        help="Disable chunked training (fall back to first-max_len truncation).")
+    parser.add_argument("--min-chunk", type=int, default=32,
+                        help="Drop chunked windows shorter than this many opcodes.")
     parser.add_argument("--max-files", type=int, default=None,
                         help="Cap files per family (useful for fast testing)")
     args = parser.parse_args()
@@ -145,6 +159,8 @@ def main() -> None:
         batch_size=args.batch,
         lr=args.lr,
         lambda_ce=args.lambda_ce,
+        chunked=not args.no_chunked,
+        min_chunk=args.min_chunk,
         device=device,
     )
     print(f"Final loss: {losses[-1]:.4f}")

@@ -38,10 +38,20 @@ def file_embedding(model: Word2Vec, opcodes: list[str]) -> np.ndarray:
     return np.mean(vectors, axis=0).astype(np.float32)
 
 
-def scale_to_range(embeddings: np.ndarray, low: float = -1.0, high: float = 1.0) -> np.ndarray:
-    """Min-max scale embeddings to [low, high] per-dimension."""
-    e_min = embeddings.min(axis=0, keepdims=True)
-    e_max = embeddings.max(axis=0, keepdims=True)
+def scale_to_range(
+    embeddings: np.ndarray,
+    low: float = -1.0,
+    high: float = 1.0,
+    ref: np.ndarray | None = None,
+) -> np.ndarray:
+    """Min-max scale embeddings to [low, high] per-dimension.
+
+    If `ref` is provided, use its per-dim min/max as the scaling source
+    (so synthetic and real end up in the same coordinate system).
+    """
+    src = ref if ref is not None else embeddings
+    e_min = src.min(axis=0, keepdims=True)
+    e_max = src.max(axis=0, keepdims=True)
     denom = np.where(e_max - e_min == 0, 1.0, e_max - e_min)
     scaled = (embeddings - e_min) / denom  # [0, 1]
     return scaled * (high - low) + low
