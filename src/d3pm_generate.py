@@ -123,7 +123,7 @@ def main() -> None:
     parser.add_argument("--chunks-per-file", type=int, default=0,
                         help="Chunks per synthetic file. 0 = auto match avg real file length.")
     parser.add_argument("--T",           type=int, default=500)
-    parser.add_argument("--max-len",     type=int, default=512)
+    parser.add_argument("--max-len",     type=int, default=2048)
     parser.add_argument("--embed-dim",   type=int, default=104)
     parser.add_argument("--out",         type=Path, default=Path("synthetic"))
     parser.add_argument("--batch",       type=int, default=64)

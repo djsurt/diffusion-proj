@@ -27,15 +27,15 @@ def train(
     out_dir: Path,
     *,
     T: int = 500,
-    max_len: int = 512,
+    max_len: int = 2048,
     d_model: int = 128,
     nhead: int = 4,
     num_layers: int = 4,
     dim_ff: int = 512,
     epochs: int = 100,
-    batch_size: int = 32,
+    batch_size: int = 8,
     lr: float = 1e-3,
-    lambda_ce: float = 0.1,
+    lambda_ce: float = 0.01,
     chunked: bool = True,
     min_chunk: int = 32,
     device: torch.device,
@@ -109,15 +109,15 @@ def main() -> None:
     parser.add_argument("--malicia",  type=Path, default=Path("malicia"))
     parser.add_argument("--out",      type=Path, default=Path("checkpoints"))
     parser.add_argument("--epochs",   type=int, default=100)
-    parser.add_argument("--batch",    type=int, default=32)
+    parser.add_argument("--batch",    type=int, default=8)
     parser.add_argument("--T",        type=int, default=500)
-    parser.add_argument("--max-len",  type=int, default=512)
+    parser.add_argument("--max-len",  type=int, default=2048)
     parser.add_argument("--d-model",  type=int, default=128)
     parser.add_argument("--nhead",    type=int, default=4)
     parser.add_argument("--layers",   type=int, default=4)
     parser.add_argument("--dim-ff",   type=int, default=512)
     parser.add_argument("--lr",       type=float, default=1e-3)
-    parser.add_argument("--lambda-ce", type=float, default=0.1)
+    parser.add_argument("--lambda-ce", type=float, default=0.01)
     parser.add_argument("--no-chunked", action="store_true",
                         help="Disable chunked training (fall back to first-max_len truncation).")
     parser.add_argument("--min-chunk", type=int, default=32,

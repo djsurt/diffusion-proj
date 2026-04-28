@@ -305,29 +305,45 @@ def main():
     parser.add_argument("--synthetic",   type=Path, default=Path("synthetic"))
     parser.add_argument("--out",         type=Path, default=Path("eval_results"))
     parser.add_argument("--threshold",   type=float, default=0.95)
+    parser.add_argument("--variant",     choices=["continuous", "d3pm"],
+                        default="continuous",
+                        help="continuous: read {f}_embeddings.npy + {f}_synthetic.npy "
+                             "(continuous DDPM W2V). d3pm: read {f}_d3pm_real_embeddings.npy + "
+                             "{f}_d3pm_synthetic.npy (D3PM W2V — keeps real and synth in the "
+                             "same coordinate system).")
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
+
+    if args.variant == "d3pm":
+        real_suffix = "_d3pm_real_embeddings.npy"
+        synth_suffix = "_d3pm_synthetic.npy"
+    else:
+        real_suffix = "_embeddings.npy"
+        synth_suffix = "_synthetic.npy"
 
     # discover families
     if args.families:
         families = args.families
     else:
-        families = [p.stem.replace("_embeddings", "")
-                    for p in args.checkpoints.glob("*_embeddings.npy")]
+        families = [p.name.removesuffix(real_suffix)
+                    for p in args.checkpoints.glob(f"*{real_suffix}")]
         families = [f for f in families
-                    if (args.synthetic / f"{f}_synthetic.npy").exists()]
+                    if (args.synthetic / f"{f}{synth_suffix}").exists()]
 
     if not families:
-        raise SystemExit("No families found. Run train.py and generate.py first.")
+        raise SystemExit(
+            f"No families found for variant '{args.variant}'. "
+            f"Looked for {real_suffix} in {args.checkpoints} and "
+            f"{synth_suffix} in {args.synthetic}.")
 
-    print(f"Evaluating families: {families}")
+    print(f"Evaluating families ({args.variant}): {families}")
 
-    real_dict  = {f: np.load(args.checkpoints / f"{f}_embeddings.npy")
+    real_dict  = {f: np.load(args.checkpoints / f"{f}{real_suffix}")
                   for f in families}
-    synth_dict = {f: np.load(args.synthetic / f"{f}_synthetic.npy")
+    synth_dict = {f: np.load(args.synthetic / f"{f}{synth_suffix}")
                   for f in families
-                  if (args.synthetic / f"{f}_synthetic.npy").exists()}
+                  if (args.synthetic / f"{f}{synth_suffix}").exists()}
 
     report = run_all_metrics(real_dict, synth_dict,
                               tsne_dir=str(args.out),
