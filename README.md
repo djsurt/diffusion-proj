@@ -2,11 +2,30 @@
 
 Generates synthetic malware opcode sequences with two diffusion models: a
 **continuous DDPM** (baseline, runs on Word2Vec embeddings) and a **discrete
-D3PM** (absorbing-state, runs on tokenised opcodes). See `CLAUDE.md` for the
-full design notes.
+D3PM** (absorbing-state, runs on tokenised opcodes). See `ARCHITECTURE.md` for
+the full design notes.
 
 This README covers running the project on a **fresh Linux machine with an
 NVIDIA GPU** (e.g. RTX 3070).
+
+## What ships in the repo (vs. what you provide / what gets created)
+
+The repo is intentionally lean — code only, no data and no artifacts.
+
+**In the repo (after `git clone`):**
+```
+src/  tests/  scripts/  requirements.txt  ARCHITECTURE.md  README.md  .gitignore
+```
+
+**You provide (gitignored, must be on disk before running):**
+- `malicia/` — the MALICIA opcode dataset, one folder per family (see "Dataset" below).
+
+**Auto-created on first run (gitignored, do not pre-create):**
+- `checkpoints/` — model weights, vocab, cached W2V, real-reference embeddings
+- `synthetic/`   — generated opcode sequences and embeddings
+- `eval_results/` — JSON reports and t-SNE PNGs
+
+**Not needed to run:** `docs/` (paper PDFs) and `CLAUDE.md` are gitignored — they live on the original author's machine only.
 
 ---
 
@@ -48,15 +67,32 @@ pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu118
 
 ## Dataset
 
-Place the MALICIA opcode dataset at `malicia/<family>/<file>.txt`, one opcode
-per line. The repo expects at least one family directory; `zeroaccess` is
-the default target. A typical layout:
+The MALICIA dataset is **not** in the repo. Copy it (or symlink it) into the
+project root before running anything:
+
+```bash
+# from the project root, after `git clone`
+cp -r /path/to/your/malicia ./malicia
+# or:  ln -s /path/to/your/malicia malicia
+```
+
+Expected layout — one folder per family, one file per sample, one opcode per
+line:
 ```
 malicia/
   zeroaccess/    # 1311 files, mean ~5700 opcodes each
   zbot/
   cridex/
   winwebsec/
+  ...
+```
+
+Verify it's wired correctly:
+```bash
+python -c "from src.data_loader import load_family_opcodes; \
+  d = load_family_opcodes('malicia', families=['zeroaccess']); \
+  print('files:', len(d['zeroaccess']), 'mean opcodes:', sum(map(len,d['zeroaccess']))//len(d['zeroaccess']))"
+# Expected: files: 1311 mean opcodes: ~5700
 ```
 
 ## Quick test (sanity check before a real run)
