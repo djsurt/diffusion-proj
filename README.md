@@ -2,8 +2,11 @@
 
 Generates synthetic malware opcode sequences with two diffusion models: a
 **continuous DDPM** (baseline, runs on Word2Vec embeddings) and a **discrete
-D3PM** (absorbing-state, runs on tokenised opcodes). See `ARCHITECTURE.md` for
-the full design notes.
+D3PM** (absorbing-state, runs on tokenised opcodes).
+
+- `COMMANDS.md` — quick command reference, every common task in one place.
+- `ARCHITECTURE.md` — design notes and file structure.
+- `scripts/HPC.md` — running on SJSU HPC (SLURM).
 
 This README covers running the project on a **fresh Linux machine with an
 NVIDIA GPU** (e.g. RTX 3070).
@@ -14,16 +17,16 @@ The repo is intentionally lean — code only, no data and no artifacts.
 
 **In the repo (after `git clone`):**
 ```
-src/  tests/  scripts/  requirements.txt  ARCHITECTURE.md  README.md  .gitignore
+mdiff/  tests/  scripts/  requirements.txt  ARCHITECTURE.md  README.md  .gitignore
 ```
 
 **You provide (gitignored, must be on disk before running):**
 - `malicia/` — the MALICIA opcode dataset, one folder per family (see "Dataset" below).
 
 **Auto-created on first run (gitignored, do not pre-create):**
-- `checkpoints/` — model weights, vocab, cached W2V, real-reference embeddings
-- `synthetic/`   — generated opcode sequences and embeddings
-- `eval_results/` — JSON reports and t-SNE PNGs
+- `checkpoints/<family>/` — model weights, vocab, cached W2V, real-reference embeddings
+- `synthetic/<family>/`   — generated opcode sequences and embeddings
+- `eval_results/<family>/` — JSON reports and t-SNE PNGs
 
 **Not needed to run:** `docs/` (paper PDFs) and `CLAUDE.md` are gitignored — they live on the original author's machine only.
 
@@ -45,7 +48,7 @@ peaks around 3–4 GB at `max_len=2048`, `batch=16`).
 # 1. Clone
 git clone <repo-url> diffusion-proj && cd diffusion-proj
 
-# 2. Create venv
+# 2. Create venv (use .venv on Linux/HPC; the local macOS dev venv is .venv312)
 python3.12 -m venv .venv
 source .venv/bin/activate
 
@@ -71,13 +74,11 @@ The MALICIA dataset is **not** in the repo. Copy it (or symlink it) into the
 project root before running anything:
 
 ```bash
-# from the project root, after `git clone`
 cp -r /path/to/your/malicia ./malicia
 # or:  ln -s /path/to/your/malicia malicia
 ```
 
-Expected layout — one folder per family, one file per sample, one opcode per
-line:
+Expected layout — one folder per family, one file per sample, one opcode per line:
 ```
 malicia/
   zeroaccess/    # 1311 files, mean ~5700 opcodes each
@@ -87,9 +88,9 @@ malicia/
   ...
 ```
 
-Verify it's wired correctly:
+Verify:
 ```bash
-python -c "from src.data_loader import load_family_opcodes; \
+python -c "from mdiff.data import load_family_opcodes; \
   d = load_family_opcodes('malicia', families=['zeroaccess']); \
   print('files:', len(d['zeroaccess']), 'mean opcodes:', sum(map(len,d['zeroaccess']))//len(d['zeroaccess']))"
 # Expected: files: 1311 mean opcodes: ~5700
@@ -109,29 +110,21 @@ The 3070 sweet spot is `max_len=2048` + `batch=16`. The full 1311-file run
 with 30 epochs takes roughly 30–60 min on a 3070.
 
 ```bash
-# 1. Train (drop --max-files to use all 1311 zeroaccess files)
-python src/d3pm_train.py \
-    --family zeroaccess \
-    --epochs 30 \
-    --max-len 2048 \
-    --batch 16 \
-    --T 500 \
-    --lambda-ce 0.01
+# 1. Train
+python -m mdiff.train --variant d3pm --families zeroaccess \
+    --epochs 30 --max-len 2048 --batch 16
 
 # 2. Generate synthetic sequences + W2V-aligned embeddings
-python src/d3pm_generate.py \
-    --family zeroaccess \
-    --n 200 \
-    --max-len 2048 \
-    --batch 64
+python -m mdiff.generate --variant d3pm --family zeroaccess \
+    --n 200 --max-len 2048 --batch 64
 
 # 3. Sequence-level eval (n-gram overlap, edit distance, opcode-frequency KL)
-python src/d3pm_evaluate.py --family zeroaccess
+python -m mdiff.seq_evaluate --family zeroaccess
 
-# 4. Embedding-level eval — IMPORTANT: --variant d3pm
-#    This reads {family}_d3pm_real_embeddings.npy and {family}_d3pm_synthetic.npy
-#    so real and synthetic share the same W2V coordinate system.
-python src/evaluate.py --families zeroaccess --variant d3pm
+# 4. Embedding-level eval — same W2V coordinate system for real & synth.
+#    Optional --compare-against pulls in side-by-side numbers from a saved DDPM run.
+python -m mdiff.evaluate --variant d3pm --families zeroaccess \
+    --compare-against eval_results/ddpm_full_report.json
 ```
 
 ### Bumping max_len for better embedding quality
@@ -141,42 +134,54 @@ fit in 4096. Going to `max_len=4096` covers more of each file in a single
 synthesis pass (less stitching) and tends to improve embedding-level metrics:
 
 ```bash
-# 4096 still fits on a 3070 with batch=4
-python src/d3pm_train.py --family zeroaccess --epochs 30 \
-    --max-len 4096 --batch 4 --T 500 --lambda-ce 0.01
-python src/d3pm_generate.py --family zeroaccess --n 200 --max-len 4096 --batch 16
+python -m mdiff.train --variant d3pm --families zeroaccess \
+    --epochs 30 --max-len 4096 --batch 4
+python -m mdiff.generate --variant d3pm --family zeroaccess \
+    --n 200 --max-len 4096 --batch 16
 ```
 
 ## Run the continuous DDPM baseline (optional)
 
 ```bash
-python src/train.py --families zeroaccess --epochs 200
-python src/generate.py --family zeroaccess --n 500
-python src/evaluate.py --families zeroaccess --variant continuous
+python -m mdiff.train --variant ddpm --families zeroaccess --epochs 200
+python -m mdiff.generate --variant ddpm --family zeroaccess --n 500
+python -m mdiff.evaluate --variant ddpm --families zeroaccess
 ```
 
 ## Output layout
 
+All artifacts for one family live under one directory in each of `checkpoints/`,
+`synthetic/`, `eval_results/`:
+
 ```
 checkpoints/
-  zeroaccess_d3pm.pt                 # trained D3PM weights
-  zeroaccess_d3pm_vocab.pkl          # opcode↔idx map
-  zeroaccess_d3pm_losses.json        # per-epoch loss
-  zeroaccess_d3pm_real_embeddings.npy   # real refs in D3PM W2V space
-  d3pm_w2v.pkl                       # cached W2V (per-family dict)
+  zeroaccess/
+    ddpm.pt                 ddpm_embeddings.npy        ddpm_losses.json
+    d3pm.pt                 d3pm_vocab.pkl             d3pm_losses.json
+    d3pm_w2v.pkl            d3pm_real_embeddings.npy
 
 synthetic/
-  zeroaccess_d3pm_synthetic.npy      # synth embeddings (same W2V space)
-  zeroaccess_d3pm_sequences/         # synth opcode sequences as text
+  zeroaccess/
+    ddpm.npy                d3pm.npy                   d3pm_sequences/
 
 eval_results/
-  full_report.json                   # all 6 metrics
-  zeroaccess_tsne.png                # t-SNE plot
+  ddpm_full_report.json     d3pm_full_report.json      # multi-family rollups
+  zeroaccess/
+    ddpm_tsne.png           d3pm_tsne.png              report.json   seq_eval.json
 ```
+
+## Adding a new diffusion variant
+
+1. Add `mdiff/models/<variant>/model.py` with the `nn.Module`.
+2. Add `mdiff/models/<variant>/runner.py` exposing
+   `train_families(args, device)` and `generate_family(args, device)`.
+   Save artifacts under `paths.family_ckpt_dir(...)` and `paths.family_synth_dir(...)`.
+3. Wire `<variant>` into the `--variant` choices in `mdiff/train.py`,
+   `mdiff/generate.py`, and `mdiff/evaluate.py`.
 
 ## Troubleshooting
 
 - **OOM during training** → drop `--batch` (16 → 8 → 4), or `--max-len 1024`.
 - **`Family 'X' not found`** → check `malicia/X/` exists and contains `.txt` files.
-- **`Missing zeroaccess_d3pm.pt`** during generate → run training first; checkpoint name is derived from `--family`.
+- **`Missing checkpoints/<family>/d3pm.pt`** during generate → run training first.
 - **F1 ≈ 1.0 on embedding eval** → almost always means `--variant d3pm` was forgotten and `evaluate.py` is comparing across two different W2V models.

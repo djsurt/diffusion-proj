@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=d3pm-zeroaccess
-#SBATCH --partition=gpu                 # SJSU HPC GPU partition; change if your cluster uses a different name (e.g. `condo`, `gpuq`)
-#SBATCH --gres=gpu:1                    # 1 GPU
+#SBATCH --partition=gpu                 # SJSU HPC GPU partition; change if your cluster uses a different name
+#SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=06:00:00                 # walltime: 6 hr (~2x estimated; covers 30-50 epochs comfortably)
+#SBATCH --time=06:00:00
 #SBATCH --output=logs/d3pm_train_%j.out
 #SBATCH --error=logs/d3pm_train_%j.err
 
@@ -20,52 +20,51 @@ echo "Started at:    $(date)"
 echo "Working dir:   $(pwd)"
 echo "=================================================="
 
-# ── 1. Load modules ─────────────────────────────────────────────────────────
-# SJSU HPC: adjust these to whatever `module avail python` and `module avail cuda` show.
+# ── 1. Modules ──────────────────────────────────────────────────────────────
 module purge
 module load python/3.12 || module load python/3.11 || module load python/3.10
-module load cuda || true                # only needed if torch wheels can't bring their own runtime
+module load cuda || true
 
-# ── 2. Activate venv (created once via HPC_SETUP.md) ────────────────────────
+# ── 2. Activate venv (created once via scripts/HPC.md) ──────────────────────
 source .venv/bin/activate
 python -c "import torch; print(f'torch={torch.__version__}, cuda available={torch.cuda.is_available()}, device={torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"cpu\"}')"
 
 mkdir -p logs checkpoints synthetic eval_results
 
 # ── 3. Train D3PM (chunked, full data) ──────────────────────────────────────
+# Knobs (defaults match mdiff.train CLI defaults — override via env vars):
+#   FAMILY=zeroaccess EPOCHS=30
 FAMILY=${FAMILY:-zeroaccess}
 EPOCHS=${EPOCHS:-30}
+N_GEN=${N_GEN:-200}
 
 echo "[$(date)] Training D3PM on '$FAMILY' for $EPOCHS epochs..."
-python src/d3pm_train.py \
-    --family "$FAMILY" \
-    --epochs "$EPOCHS" \
-    --T 500 \
-    --max-len 512 \
-    --batch 32 \
-    --d-model 128 \
-    --nhead 4 \
-    --layers 4 \
-    --dim-ff 512 \
-    --lambda-ce 0.1 \
-    --lr 1e-3
+python -m mdiff.train \
+    --variant d3pm \
+    --families "$FAMILY" \
+    --epochs "$EPOCHS"
 
 # ── 4. Generate synthetic + build shared W2V real reference ────────────────
-echo "[$(date)] Generating synthetic sequences..."
-python src/d3pm_generate.py \
+echo "[$(date)] Generating $N_GEN synthetic samples for '$FAMILY'..."
+python -m mdiff.generate \
+    --variant d3pm \
     --family "$FAMILY" \
-    --n 200 \
-    --T 500 \
-    --max-len 512 \
-    --batch 64
+    --n "$N_GEN"
 
-# ── 5. Side-by-side compare against existing continuous DDPM eval ──────────
-echo "[$(date)] Running comparison..."
-python src/d3pm_compare.py --family "$FAMILY"
+# ── 5. Embedding-level eval (with side-by-side vs continuous DDPM, if present)
+echo "[$(date)] Embedding-level eval (D3PM)..."
+COMPARE_FLAG=""
+if [ -f eval_results/ddpm_full_report.json ]; then
+    COMPARE_FLAG="--compare-against eval_results/ddpm_full_report.json"
+fi
+python -m mdiff.evaluate \
+    --variant d3pm \
+    --families "$FAMILY" \
+    $COMPARE_FLAG
 
 # ── 6. Sequence-level eval (n-gram, edit distance, freq-KL) ────────────────
-echo "[$(date)] Running sequence-level eval..."
-python src/d3pm_evaluate.py --family "$FAMILY"
+echo "[$(date)] Sequence-level eval..."
+python -m mdiff.seq_evaluate --family "$FAMILY"
 
 echo "=================================================="
 echo "Finished at:   $(date)"

@@ -1,5 +1,5 @@
 """
-Vocabulary and dataset utilities for D3PM discrete diffusion on opcode sequences.
+Vocabulary and dataset utilities for D3PM (or any token-level discrete variant).
 
 Special token layout (per family vocabulary):
   index 0 … K-1  : unique opcodes (sorted for determinism)
@@ -25,8 +25,6 @@ class Vocabulary:
         self._tok2idx: dict[str, int] = {}
         self._idx2tok: list[str] = []
 
-    # ── construction ──────────────────────────────────────────────────────────
-
     @classmethod
     def from_sequences(cls, sequences: list[list[str]]) -> "Vocabulary":
         """Build from a list of opcode sequences (one list per file)."""
@@ -35,8 +33,6 @@ class Vocabulary:
         vocab._idx2tok = opcodes + [cls.MASK_TOKEN, cls.PAD_TOKEN]
         vocab._tok2idx = {tok: i for i, tok in enumerate(vocab._idx2tok)}
         return vocab
-
-    # ── special-token indices ─────────────────────────────────────────────────
 
     @property
     def mask_idx(self) -> int:
@@ -50,8 +46,6 @@ class Vocabulary:
     def size(self) -> int:
         return len(self._idx2tok)
 
-    # ── encode / decode ───────────────────────────────────────────────────────
-
     def encode(self, seq: list[str], max_len: int) -> torch.Tensor:
         """Tokenise → truncate to max_len → right-pad with PAD."""
         indices = [self._tok2idx.get(op, self.mask_idx) for op in seq[:max_len]]
@@ -62,8 +56,6 @@ class Vocabulary:
         """Integer tensor → opcode strings, skipping MASK and PAD."""
         special = {self.mask_idx, self.pad_idx}
         return [self._idx2tok[i] for i in indices.tolist() if i not in special]
-
-    # ── persistence ───────────────────────────────────────────────────────────
 
     def save(self, path: Path | str) -> None:
         with open(path, "wb") as fh:
@@ -76,7 +68,7 @@ class Vocabulary:
 
 
 class OpcodeDataset(Dataset):
-    """Tokenised + padded opcode sequences for D3PM training.
+    """Tokenised + padded opcode sequences for token-level training.
 
     Truncates each file to the first `max_len` opcodes. Use OpcodeChunkedDataset
     to instead train on every opcode in every file.
@@ -96,8 +88,8 @@ class OpcodeDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        tokens = self.data[idx]                        # (max_len,)
-        pad_mask = tokens == self.vocab.pad_idx        # True = PAD (ignored in loss)
+        tokens = self.data[idx]
+        pad_mask = tokens == self.vocab.pad_idx
         return {"tokens": tokens, "pad_mask": pad_mask}
 
 

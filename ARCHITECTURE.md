@@ -135,22 +135,45 @@
 
 ```
 diffusion-proj/
-├── malicia/                     # Dataset (opcodes per family)
+├── malicia/                       # Dataset (opcodes per family, gitignored)
 │   ├── zeroaccess/*.asm.txt
 │   ├── winwebsec/*.asm.txt
 │   └── ...
-├── src/
-│   ├── data_loader.py           # Load opcode sequences
-│   ├── embeddings.py            # Per-family Word2Vec + file averaging
-│   ├── diffusion.py             # Modified DDPM + 1D U-Net
-│   ├── train.py                 # Training loop (CLI)
-│   ├── generate.py              # Sample from trained model (CLI)
-│   └── evaluate.py              # Binary classification, cosine sim, t-SNE
+├── mdiff/                         # Python package
+│   ├── data/                      # Data loading + Word2Vec + vocab
+│   │   ├── loader.py              #   load_family_opcodes
+│   │   ├── embeddings.py          #   Word2Vec, file_embedding, scale_to_range
+│   │   ├── vocab.py               #   Vocabulary, OpcodeDataset(Chunked)
+│   │   └── preprocess.py          #   binaries → opcode .txt files
+│   ├── models/
+│   │   ├── ddpm/                  # Continuous DDPM variant
+│   │   │   ├── model.py           #   MalwareDiffusion + 1D U-Net
+│   │   │   └── runner.py          #   train_families / generate_family
+│   │   └── d3pm/                  # Discrete D3PM variant
+│   │       ├── model.py           #   AbsorbingD3PM
+│   │       └── runner.py          #   train_families / generate_family
+│   ├── paths.py                   # Per-family output layout (DDPM_*, D3PM_*)
+│   ├── train.py                   # Unified CLI: --variant {ddpm,d3pm}
+│   ├── generate.py                # Unified CLI
+│   ├── evaluate.py                # All 6 paper metrics (embedding-level)
+│   └── seq_evaluate.py            # n-gram, edit distance, freq-KL (token-level)
 ├── tests/
-│   └── test_pipeline.py         # ~5min test suite (small families)
-├── checkpoints/                 # Saved model weights + embeddings
-└── synthetic/                   # Generated .npy files
+│   ├── test_d3pm.py               # < 30 s (no malicia data needed)
+│   └── test_pipeline.py           # ~5 min, hits a few small families
+├── scripts/
+│   ├── HPC.md
+│   ├── hpc_train_continuous.slurm
+│   └── hpc_train_d3pm.slurm
+├── checkpoints/<family>/          # Per-family artifacts (see paths.py)
+├── synthetic/<family>/
+└── eval_results/<family>/
 ```
+
+### Adding a new diffusion variant
+
+1. Create `mdiff/models/<variant>/model.py` (the `nn.Module`).
+2. Create `mdiff/models/<variant>/runner.py` exposing `train_families(args, device)` and `generate_family(args, device)`. Save artifacts under `paths.family_ckpt_dir(...)` and `paths.family_synth_dir(...)`.
+3. Add `<variant>` to the `--variant` choices in `mdiff/train.py`, `mdiff/generate.py`, and `mdiff/evaluate.py`, and dispatch to the new runner.
 
 ## Training a Full Run
 
@@ -158,13 +181,13 @@ diffusion-proj/
 # Activate venv
 source .venv312/bin/activate
 
-# Train on all families (slow — hours for large families)
-python src/train.py --malicia malicia/ --out checkpoints/ --epochs 200 --T 1000
+# Train continuous DDPM on multiple families
+python -m mdiff.train --variant ddpm --families zeroaccess zbot winwebsec --epochs 200
 
-# Train on specific families only
-python src/train.py --malicia malicia/ --out checkpoints/ \
-    --families zeroaccess zbot winwebsec --epochs 200
+# Train discrete D3PM on a single family
+python -m mdiff.train --variant d3pm --families zeroaccess --epochs 100
 
 # Generate synthetic samples
-python src/generate.py --checkpoints checkpoints/ --family zeroaccess --n 500
+python -m mdiff.generate --variant ddpm --family zeroaccess --n 500
+python -m mdiff.generate --variant d3pm --family zeroaccess --n 200
 ```

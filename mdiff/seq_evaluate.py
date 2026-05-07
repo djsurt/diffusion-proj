@@ -1,19 +1,26 @@
 """
-Sequence-level evaluation metrics for D3PM generated opcode sequences.
+Sequence-level evaluation metrics for token-level (D3PM-style) generated opcodes.
 
 Metrics:
   1. Opcode-frequency KL divergence  — real vs synthetic unigram distributions
   2. N-gram precision / recall / F1   — 1, 2, 3 grams
   3. Edit-distance distribution       — sampled pairwise Levenshtein distances
 
-All functions accept lists of opcode sequences (list[list[str]]).
+Usage:
+    python -m mdiff.seq_evaluate --family zeroaccess
 """
 
+import argparse
+import json
 import random
 from collections import Counter
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+
+from mdiff.data import load_family_opcodes
+from mdiff import paths
 
 
 # ── 1. Opcode frequency KL divergence ───────────────────────────────────────
@@ -24,12 +31,7 @@ def opcode_freq_kl(
     synthetic: list[list[str]],
     eps: float = 1e-10,
 ) -> dict[str, float]:
-    """
-    Compare unigram opcode frequency distributions via KL divergence.
-
-    Returns KL(real || synthetic) and KL(synthetic || real).
-    Lower is better (0 = identical distribution).
-    """
+    """Unigram KL divergence between real and synthetic opcode distributions."""
     real_counts = Counter(op for seq in real for op in seq)
     synth_counts = Counter(op for seq in synthetic for op in seq)
 
@@ -45,7 +47,6 @@ def opcode_freq_kl(
 
     kl_rs = float(np.sum(p * np.log(p / q)))
     kl_sr = float(np.sum(q * np.log(q / p)))
-
     return {
         "kl_real_vs_synth": kl_rs,
         "kl_synth_vs_real": kl_sr,
@@ -68,31 +69,21 @@ def ngram_overlap(
     synthetic: list[list[str]],
     ns: Sequence[int] = (1, 2, 3),
 ) -> dict[str, float]:
-    """
-    Corpus-level n-gram precision, recall, F1 between real and synthetic corpora.
-
-    Precision = fraction of synthetic n-grams that appear in real.
-    Recall    = fraction of real n-grams that appear in synthetic.
-    """
+    """Corpus-level n-gram precision/recall/F1."""
     results: dict[str, float] = {}
     for n in ns:
         real_ngrams = sum((_ngrams(s, n) for s in real), Counter())
         synth_ngrams = sum((_ngrams(s, n) for s in synthetic), Counter())
-
         real_types = set(real_ngrams)
         synth_types = set(synth_ngrams)
-
         overlap = real_types & synth_types
-
         precision = len(overlap) / max(len(synth_types), 1)
         recall = len(overlap) / max(len(real_types), 1)
         f1 = (2 * precision * recall / (precision + recall)
               if precision + recall > 0 else 0.0)
-
         results[f"{n}gram_precision"] = float(precision)
         results[f"{n}gram_recall"] = float(recall)
         results[f"{n}gram_f1"] = float(f1)
-
     return results
 
 
@@ -121,15 +112,10 @@ def edit_distance_stats(
     n_pairs: int = 200,
     seed: int = 42,
 ) -> dict[str, float]:
-    """
-    Sampled pairwise edit distances:
-      - real vs synthetic  (quality)
-      - real vs real       (baseline diversity)
-      - synthetic vs synthetic (synthetic diversity)
-    """
+    """Sampled pairwise edit distances: r↔s, r↔r baseline, s↔s diversity."""
     rng = random.Random(seed)
 
-    def _sample_pairs(A: list[list[str]], B: list[list[str]], k: int) -> list[int]:
+    def _sample_pairs(A, B, k):
         pairs = [(rng.choice(A), rng.choice(B)) for _ in range(k)]
         return [_levenshtein(a, b) for a, b in pairs]
 
@@ -137,7 +123,7 @@ def edit_distance_stats(
     rr_dists = _sample_pairs(real, real, n_pairs)
     ss_dists = _sample_pairs(synthetic, synthetic, n_pairs)
 
-    def _stats(dists: list[int]) -> dict:
+    def _stats(dists):
         arr = np.array(dists, dtype=float)
         return {"mean": float(arr.mean()), "median": float(np.median(arr)),
                 "std": float(arr.std())}
@@ -158,9 +144,6 @@ def evaluate_sequences(
     synthetic: list[list[str]],
     n_edit_pairs: int = 200,
 ) -> dict:
-    """
-    Run all three sequence-level metrics and print a summary.
-    """
     print(f"\n[{family}] Sequence-level evaluation")
     print(f"  real={len(real)} seqs, synthetic={len(synthetic)} seqs")
 
@@ -190,21 +173,18 @@ def evaluate_sequences(
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    import argparse, json, sys
-    from pathlib import Path
 
-    sys.path.insert(0, str(Path(__file__).parent))
-    from data_loader import load_family_opcodes
-
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sequence-level evaluation of D3PM generated opcodes.")
+        description="Sequence-level evaluation for token-level diffusion variants.")
     parser.add_argument("--family",   required=True)
-    parser.add_argument("--malicia",  type=Path, default=Path("malicia"))
-    parser.add_argument("--synth-dir", type=Path, default=Path("synthetic"),
-                        help="Directory containing <family>_d3pm_sequences/")
-    parser.add_argument("--out",      type=Path, default=Path("eval_results"))
-    parser.add_argument("--n-pairs",  type=int, default=200)
+    parser.add_argument("--variant",  default="d3pm",
+                        help="Subdirectory name under synthetic/<family>/ for sequences. "
+                             "Default 'd3pm' → reads synthetic/<family>/d3pm_sequences/.")
+    parser.add_argument("--malicia", type=Path, default=Path("malicia"))
+    parser.add_argument("--synthetic", type=Path, default=Path("synthetic"))
+    parser.add_argument("--out",     type=Path, default=Path("eval_results"))
+    parser.add_argument("--n-pairs", type=int, default=200)
     args = parser.parse_args()
 
     corpus = load_family_opcodes(args.malicia, families=[args.family])
@@ -212,9 +192,10 @@ if __name__ == "__main__":
         raise SystemExit(f"Family '{args.family}' not found in {args.malicia}")
     real_seqs = corpus[args.family]
 
-    seq_dir = args.synth_dir / f"{args.family}_d3pm_sequences"
+    seq_dir_name = paths.D3PM_SEQ_DIR if args.variant == "d3pm" else f"{args.variant}_sequences"
+    seq_dir = args.synthetic / args.family / seq_dir_name
     if not seq_dir.exists():
-        raise SystemExit(f"No synthetic sequences at {seq_dir}  — run d3pm_generate.py first")
+        raise SystemExit(f"No synthetic sequences at {seq_dir}  — run generation first.")
 
     synth_seqs = [
         p.read_text().splitlines()
@@ -224,7 +205,11 @@ if __name__ == "__main__":
 
     report = evaluate_sequences(args.family, real_seqs, synth_seqs, args.n_pairs)
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    out_path = args.out / f"{args.family}_d3pm_seq_eval.json"
+    out_dir = paths.family_eval_dir(args.out, args.family)
+    out_path = out_dir / paths.SEQ_EVAL
     out_path.write_text(json.dumps(report, indent=2))
     print(f"\nReport saved → {out_path}")
+
+
+if __name__ == "__main__":
+    main()

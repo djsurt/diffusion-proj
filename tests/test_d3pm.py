@@ -10,7 +10,7 @@ Tests cover:
 
 Uses a tiny corpus of synthetic opcode sequences so the suite runs in < 30s.
 
-Run: python tests/test_d3pm.py
+Run: python -m unittest tests.test_d3pm   (or `python tests/test_d3pm.py`)
 """
 
 import sys
@@ -20,11 +20,12 @@ from pathlib import Path
 import torch
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Ensure project root is on sys.path so `mdiff` resolves regardless of cwd.
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from d3pm_data import Vocabulary, OpcodeDataset
-from d3pm import AbsorbingD3PM
-from d3pm_evaluate import opcode_freq_kl, ngram_overlap, edit_distance_stats
+from mdiff.data import Vocabulary, OpcodeDataset
+from mdiff.models.d3pm import AbsorbingD3PM
+from mdiff.seq_evaluate import opcode_freq_kl, ngram_overlap, edit_distance_stats
 
 # ── tiny synthetic corpus ─────────────────────────────────────────────────────
 OPCODES = ["mov", "push", "pop", "call", "ret", "xor", "add", "sub", "jmp", "nop"]
@@ -41,7 +42,7 @@ SEQS = _make_seqs(30)
 
 FAST_T = 50
 FAST_MAX_LEN = 64
-EMBED_DIM = 16   # tiny for speed
+EMBED_DIM = 16
 
 # ── Vocabulary tests ──────────────────────────────────────────────────────────
 
@@ -51,7 +52,6 @@ class TestVocabulary(unittest.TestCase):
         self.vocab = Vocabulary.from_sequences(SEQS)
 
     def test_size(self):
-        # unique opcodes + MASK + PAD
         expected = len({op for seq in SEQS for op in seq}) + 2
         self.assertEqual(self.vocab.size, expected)
 
@@ -73,7 +73,6 @@ class TestVocabulary(unittest.TestCase):
         long_seq = ["mov"] * 200
         tokens = self.vocab.encode(long_seq, max_len=FAST_MAX_LEN)
         self.assertEqual(len(tokens), FAST_MAX_LEN)
-        # No PAD tokens since the sequence is longer than max_len
         self.assertFalse((tokens == self.vocab.pad_idx).any())
 
     def test_decode_roundtrip(self):
@@ -88,14 +87,13 @@ class TestVocabulary(unittest.TestCase):
         self.assertEqual(decoded, ["mov"])
 
     def test_mask_not_in_decode(self):
-        # Manually create a tensor with MASK
         t = torch.tensor([self.vocab.mask_idx, 0, self.vocab.pad_idx])
         decoded = self.vocab.decode(t)
         self.assertNotIn(Vocabulary.MASK_TOKEN, decoded)
         self.assertNotIn(Vocabulary.PAD_TOKEN, decoded)
 
     def test_save_load(self):
-        import tempfile, pickle
+        import tempfile
         with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
             path = f.name
         self.vocab.save(path)
@@ -175,24 +173,19 @@ class TestD3PMModel(unittest.TestCase):
         self.assertEqual(x_t.shape, tokens.shape)
 
     def test_q_sample_only_masks(self):
-        """q_sample can only MASK tokens — it must not change unmasked tokens to other opcodes."""
         tokens, _ = self._batch()
         t = torch.randint(1, FAST_T + 1, (4,))
         x_t = self.model.q_sample(tokens, t)
         mask_idx = self.vocab.mask_idx
-        # For each position: x_t[i,j] is either the original token OR the MASK
         same_or_masked = (x_t == tokens) | (x_t == mask_idx)
         self.assertTrue(same_or_masked.all())
 
     def test_q_sample_pad_stays_pad(self):
-        """PAD tokens must never become MASK."""
         tokens, _ = self._batch()
-        # Force at-least a few PAD positions
         tokens[:, -10:] = self.vocab.pad_idx
-        t = torch.full((4,), FAST_T, dtype=torch.long)  # maximum masking
+        t = torch.full((4,), FAST_T, dtype=torch.long)
         x_t = self.model.q_sample(tokens, t)
         pad_positions = tokens == self.vocab.pad_idx
-        # All original PAD positions should still be PAD
         self.assertTrue((x_t[pad_positions] == self.vocab.pad_idx).all())
 
     def test_alpha_bar_boundary(self):
@@ -204,12 +197,10 @@ class TestD3PMModel(unittest.TestCase):
         self.assertEqual(samples.shape, (5, FAST_MAX_LEN))
 
     def test_sample_no_mask_token(self):
-        """Generated samples should not contain MASK tokens."""
         samples = self.model.sample(n=4, seq_len=FAST_MAX_LEN, device=self.device)
         self.assertFalse((samples == self.vocab.mask_idx).any())
 
     def test_sample_valid_vocab(self):
-        """All generated tokens must be valid vocab indices."""
         samples = self.model.sample(n=4, seq_len=FAST_MAX_LEN, device=self.device)
         self.assertTrue((samples >= 0).all())
         self.assertTrue((samples < self.vocab.size).all())

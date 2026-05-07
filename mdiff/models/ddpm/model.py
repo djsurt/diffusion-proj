@@ -69,9 +69,9 @@ class AttentionBlock1D(nn.Module):
         k = k.reshape(B, H, C // H, L)
         v = v.reshape(B, H, C // H, L)
         scale = (C // H) ** -0.5
-        attn = (q.transpose(-2, -1) @ k) * scale           # (B, H, L, L)
+        attn = (q.transpose(-2, -1) @ k) * scale
         attn = attn.softmax(dim=-1)
-        out = v @ attn.transpose(-2, -1)                    # (B, H, C/H, L)
+        out = v @ attn.transpose(-2, -1)
         out = out.reshape(B, C, L)
         return x + self.proj(out)
 
@@ -110,21 +110,21 @@ class UNet1D(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         t_emb = self.time_emb(t)
 
-        h = self.in_conv(x)                              # (B, c1, L)
-        e1 = self.enc1(h, t_emb)                         # (B, c1, L)
-        e2 = self.enc2(self.down1(e1), t_emb)            # (B, c2, L/2)
+        h = self.in_conv(x)
+        e1 = self.enc1(h, t_emb)
+        e2 = self.enc2(self.down1(e1), t_emb)
 
-        m = self.down2(e2)                               # (B, c3, L/4)
+        m = self.down2(e2)
         m = self.mid1(m, t_emb)
         m = self.attn(m)
         m = self.mid2(m, t_emb)
 
-        d2 = self.up2(m)                                 # (B, c2, L/2)
+        d2 = self.up2(m)
         if d2.shape[-1] != e2.shape[-1]:
             d2 = d2[:, :, : e2.shape[-1]]
         d2 = self.dec2(d2 + e2, t_emb)
 
-        d1 = self.up1(d2)                                # (B, c1, L)
+        d1 = self.up1(d2)
         if d1.shape[-1] != e1.shape[-1]:
             d1 = d1[:, :, : e1.shape[-1]]
         d1 = self.dec1(d1 + e1, t_emb)
@@ -199,16 +199,13 @@ class MalwareDiffusion(nn.Module):
         Reverse diffusion (Algorithm 1 from paper).
 
         Paper approach: sample n real embeddings, forward-diffuse to T_half,
-        then reverse-diffuse back. This is SDEdit-style augmentation — the
-        synthetic samples are noisy perturbations of real samples, which
-        preserves the real data's variance structure.
+        then reverse-diffuse back. This is SDEdit-style augmentation.
 
-        If x0_real is None: fall back to starting from N(0, I) (non-paper behavior,
-        kept for tests on untrained models).
+        If x0_real is None: fall back to starting from N(0, I).
         """
         if x0_real is not None:
             if x0_real.dim() == 2:
-                x0_real = x0_real.unsqueeze(1)  # (N, 1, D)
+                x0_real = x0_real.unsqueeze(1)
             idx = torch.randint(0, x0_real.shape[0], (n,), device=x0_real.device)
             x0 = x0_real[idx].to(device)
             t_start = torch.full((n,), self.T_half - 1, device=device, dtype=torch.long)
@@ -232,4 +229,4 @@ class MalwareDiffusion(nn.Module):
                 z = torch.randn_like(x)
                 x = x + sigma * z
 
-        return x.squeeze(1)  # (n, embed_dim)
+        return x.squeeze(1)

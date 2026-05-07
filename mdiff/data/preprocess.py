@@ -18,12 +18,11 @@ Output structure:
             binary3.txt
 
 Usage:
-    python preprocess.py --input samples/ --output opcodes/
+    python -m mdiff.data.preprocess --input samples/ --output opcodes/
 """
 
 import argparse
 import subprocess
-import os
 import sys
 from pathlib import Path
 
@@ -49,15 +48,12 @@ def extract_opcodes(binary_path: Path) -> list[str]:
 
     opcodes = []
     for line in result.stdout.splitlines():
-        # Instruction lines start with whitespace followed by a hex address and colon
         stripped = line.lstrip()
         if not stripped or stripped[0] not in "0123456789abcdef":
             continue
         if ":" not in stripped:
             continue
 
-        # LLVM objdump format: "  address: bytes\topcode\toperands"
-        # Split on tab — field index 1 is the mnemonic
         parts = line.split("\t")
         if len(parts) < 2:
             continue
@@ -75,7 +71,6 @@ def preprocess(input_dir: Path, output_dir: Path):
     families = [d for d in sorted(input_dir.iterdir()) if d.is_dir()]
 
     if not families:
-        # Flat layout — treat all files as one unnamed family
         print(f"No subdirectories found. Treating all files in {input_dir} as one family.")
         families_map = {"unknown_family": list(input_dir.iterdir())}
     else:
@@ -95,7 +90,6 @@ def preprocess(input_dir: Path, output_dir: Path):
 
             out_file = family_out / (binary.name + ".txt")
 
-            # Skip if already processed
             if out_file.exists():
                 processed += 1
                 continue

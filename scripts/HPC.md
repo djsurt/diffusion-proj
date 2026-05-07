@@ -108,17 +108,18 @@ FAMILIES="zeroaccess" sbatch scripts/hpc_train_continuous.slurm
 FAMILIES="cridex zbot zeroaccess winwebsec" sbatch scripts/hpc_train_continuous.slurm
 ```
 
-What lands in your repo when it finishes:
+What lands in your repo when it finishes (per-family layout):
 
 ```
-checkpoints/{family}_diffusion.pt          # trained DDPM
-checkpoints/{family}_embeddings.npy        # real W2V embeddings
-checkpoints/{family}_losses.json
-checkpoints/w2v_models.pkl                 # ALL W2V models for this run (overwritten each time)
-checkpoints/embeddings.npy                 # combined dict of all family embeddings
-synthetic/{family}_synthetic.npy           # generated embeddings
-eval_results/full_report.json              # all 6 metrics
-eval_results/{family}_tsne.png             # t-SNE per family
+checkpoints/<family>/
+  ddpm.pt                  # trained DDPM weights
+  ddpm_embeddings.npy      # real W2V embeddings (DDPM coordinate system)
+  ddpm_losses.json
+synthetic/<family>/
+  ddpm.npy                 # generated embeddings
+eval_results/
+  ddpm_full_report.json    # all 6 metrics, multi-family
+  <family>/ddpm_tsne.png   # per-family t-SNE
 ```
 
 ### 2b. Discrete D3PM
@@ -137,25 +138,34 @@ FAMILY=winwebsec EPOCHS=30 sbatch scripts/hpc_train_d3pm.slurm
 What lands in your repo:
 
 ```
-checkpoints/{family}_d3pm.pt
-checkpoints/{family}_d3pm_vocab.pkl
-checkpoints/{family}_d3pm_losses.json
-checkpoints/{family}_d3pm_real_embeddings.npy   # real ref in fresh W2V space
-checkpoints/d3pm_w2v.pkl                        # W2V used by D3PM (separate from continuous one)
-synthetic/{family}_d3pm_synthetic.npy
-synthetic/{family}_d3pm_sequences/seq_*.txt     # raw opcode token sequences
-eval_results/{family}_d3pm_vs_continuous.json   # side-by-side w/ continuous numbers
-eval_results/{family}_d3pm_seq_eval.json        # n-gram, edit dist, freq-KL
+checkpoints/<family>/
+  d3pm.pt                          # trained D3PM weights
+  d3pm_vocab.pkl                   # opcode↔idx
+  d3pm_losses.json
+  d3pm_w2v.pkl                     # W2V used by D3PM (separate from continuous one)
+  d3pm_real_embeddings.npy         # real ref in D3PM W2V space
+synthetic/<family>/
+  d3pm.npy                         # synth embeddings (same W2V space as real ref)
+  d3pm_sequences/seq_*.txt         # raw opcode token sequences
+eval_results/
+  d3pm_full_report.json            # all 6 metrics
+  <family>/
+    d3pm_tsne.png
+    seq_eval.json                  # n-gram, edit distance, freq-KL
 ```
+
+The D3PM slurm script also runs `mdiff.evaluate --compare-against` against a
+previously-saved DDPM report (if `eval_results/ddpm_full_report.json` exists),
+giving you side-by-side per-family numbers in the SLURM log.
 
 ### 2c. What if I want continuous DDPM AND D3PM in the SAME W2V space?
 
-Right now the two scripts maintain separate W2V models on purpose (so you don't lose
-your existing `checkpoints/{family}_embeddings.npy` baseline). If you want a true
-side-by-side eval against one shared real reference, run `hpc_train_d3pm.slurm` first
-(it builds `d3pm_w2v.pkl`), then write a small wrapper that reuses that W2V to
-recompute the continuous DDPM's embeddings and retrain it on those. Not currently
-automated — open an issue / ask if you want this added.
+The two scripts maintain separate W2V models on purpose (the DDPM W2V is the
+paper baseline; the D3PM W2V is freshly trained from the generated sequences).
+For a true side-by-side eval against one shared real reference, run
+`hpc_train_d3pm.slurm` first (it builds `checkpoints/<family>/d3pm_w2v.pkl`),
+then write a small wrapper that reuses that W2V to recompute the continuous
+DDPM's embeddings and retrain it on those. Not currently automated.
 
 ---
 
@@ -187,7 +197,6 @@ nvidia-smi
 After a job finishes, from your **laptop**:
 
 ```bash
-# Continuous DDPM artefacts
 rsync -av --progress \
   <user>@coe-hpc.sjsu.edu:~/diffusion-proj/checkpoints/ ./checkpoints/
 rsync -av --progress \
@@ -204,8 +213,8 @@ If you only want one family:
 
 ```bash
 rsync -av --progress \
-  <user>@coe-hpc.sjsu.edu:~/diffusion-proj/checkpoints/zeroaccess_d3pm* \
-  ./checkpoints/
+  <user>@coe-hpc.sjsu.edu:~/diffusion-proj/checkpoints/zeroaccess/ \
+  ./checkpoints/zeroaccess/
 ```
 
 ---
@@ -231,14 +240,14 @@ the first submission:
 ## 6. Troubleshooting
 
 **Job pending forever** → `squeue -u $USER` shows `(Resources)` or `(Priority)`.
-The GPU partition is busy. Check queue depth: `squeue -p gpu | wc -l`. Either wait
-or try a smaller resource ask (e.g. `--mem=16G`).
+The GPU partition is busy. Check queue depth: `squeue -p gpu | wc -l`.
 
 **`torch.cuda.is_available() == False` inside the job** → the wheel's CUDA runtime
 doesn't match the node's driver. See §1c — install a matching wheel.
 
 **Out-of-memory (OOM)** in the SLURM err log → bump `--mem`. For D3PM on a family
-with very long files, also consider lowering `--batch` from 32 to 16 in the script.
+with very long files, also consider lowering `--batch` (override via `BATCH=8 sbatch ...`
+once we wire it through, or edit the slurm file).
 
 **Walltime exceeded** (`TIMEOUT` state in `sacct`) → bump `--time` and resubmit.
 Training is checkpoint-free right now (no resume from partial epoch); a timeout
@@ -249,13 +258,11 @@ Modules`, both expose `module`. If your shell strictly doesn't, add
 `source /etc/profile.d/modules.sh` before the `module purge` line.
 
 **Permission denied on `.slurm` script** → `chmod +x scripts/*.slurm` once after
-the first rsync (sbatch doesn't actually require executable bit, but it's good
-hygiene).
+the first rsync.
 
 **Logs go to `slurm-<jobid>.out` instead of `logs/`** → the `logs/` dir didn't
-exist when sbatch submitted. The scripts call `mkdir -p logs` early, but the
-SLURM directives `--output=logs/...` are evaluated at submit time. Run
-`mkdir -p logs` in your project root before the first sbatch.
+exist when sbatch submitted. Run `mkdir -p logs` in your project root before the
+first sbatch.
 
 ---
 
@@ -263,6 +270,6 @@ SLURM directives `--output=logs/...` are evaluated at submit time. Run
 
 - Running unit tests (`tests/test_d3pm.py`, `tests/test_pipeline.py`) — fast on
   laptop, no need to burn GPU hours
-- Pre-processing (`preprocess.py`) — already run; only re-run if Malicia changes
-- The interactive `t-SNE` viewer — generates static `.png`s in `eval_results/`
+- Pre-processing (`mdiff.data.preprocess`) — already run; only re-run if Malicia changes
+- The interactive `t-SNE` viewer — generates static `.png`s in `eval_results/<family>/`
   instead, fetched via rsync

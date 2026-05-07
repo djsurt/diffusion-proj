@@ -16,12 +16,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-# Allow imports from src/
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Allow imports of `mdiff` package regardless of cwd
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data_loader import load_family_opcodes
-from embeddings import build_family_embeddings, scale_to_range
-from diffusion import MalwareDiffusion
+from mdiff.data import load_family_opcodes, build_family_embeddings, scale_to_range
+from mdiff.models.ddpm import MalwareDiffusion
 
 MALICIA = Path(__file__).parent.parent / "malicia"
 # Small families that load fast
