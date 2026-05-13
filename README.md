@@ -6,7 +6,6 @@ D3PM** (absorbing-state, runs on tokenised opcodes).
 
 - `COMMANDS.md` — quick command reference, every common task in one place.
 - `ARCHITECTURE.md` — design notes and file structure.
-- `scripts/HPC.md` — running on SJSU HPC (SLURM).
 
 This README covers running the project on a **fresh Linux machine with an
 NVIDIA GPU** (e.g. RTX 3070).
@@ -48,7 +47,7 @@ peaks around 3–4 GB at `max_len=2048`, `batch=16`).
 # 1. Clone
 git clone <repo-url> diffusion-proj && cd diffusion-proj
 
-# 2. Create venv (use .venv on Linux/HPC; the local macOS dev venv is .venv312)
+# 2. Create venv (use .venv on Linux; the local macOS dev venv is .venv312)
 python3.12 -m venv .venv
 source .venv/bin/activate
 

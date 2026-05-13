@@ -161,9 +161,7 @@ diffusion-proj/
 │   ├── test_d3pm.py               # < 30 s (no malicia data needed)
 │   └── test_pipeline.py           # ~5 min, hits a few small families
 ├── scripts/
-│   ├── HPC.md
-│   ├── hpc_train_continuous.slurm
-│   └── hpc_train_d3pm.slurm
+│   └── colab_d3pm.ipynb
 ├── checkpoints/<family>/          # Per-family artifacts (see paths.py)
 ├── synthetic/<family>/
 └── eval_results/<family>/

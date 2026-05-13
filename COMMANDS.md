@@ -1,11 +1,11 @@
 # Commands — quick reference
 
-Every common task, with the exact command. For setup, see `README.md`. For HPC,
-see `scripts/HPC.md`. For architecture/design, see `ARCHITECTURE.md`.
+Every common task, with the exact command. For setup, see `README.md`. For
+architecture/design, see `ARCHITECTURE.md`.
 
 All commands assume:
 - cwd = repo root
-- venv active: `source .venv312/bin/activate` (macOS dev) or `source .venv/bin/activate` (HPC)
+- venv active: `source .venv312/bin/activate` (macOS dev) or `source .venv/bin/activate` (Linux/CUDA host)
 
 ## Sanity checks
 
@@ -108,29 +108,6 @@ CUDA_VISIBLE_DEVICES="" python -m mdiff.train --variant d3pm --families zeroacce
    - `mdiff/train.py` (also add a defaults entry in `_apply_variant_defaults`)
    - `mdiff/generate.py` (same)
    - `mdiff/evaluate.py` (`_variant_paths`)
-
-## HPC (SJSU SLURM)
-
-```bash
-mkdir -p logs
-
-# Continuous DDPM (defaults: 3 families, 200 epochs, 500 synth)
-sbatch scripts/hpc_train_continuous.slurm
-FAMILIES="zeroaccess" EPOCHS=300 sbatch scripts/hpc_train_continuous.slurm
-
-# Discrete D3PM (defaults: zeroaccess, 30 epochs, 200 synth)
-sbatch scripts/hpc_train_d3pm.slurm
-FAMILY=winwebsec EPOCHS=50 sbatch scripts/hpc_train_d3pm.slurm
-
-# Watch
-squeue -u $USER
-tail -f logs/d3pm_train_<jobid>.out
-
-# Pull results back to laptop
-rsync -av <user>@coe-hpc.sjsu.edu:~/diffusion-proj/{checkpoints,synthetic,eval_results}/ ./
-```
-
-Full HPC setup, troubleshooting, and partition knobs: `scripts/HPC.md`.
 
 ## Where things land
 
